@@ -5,12 +5,12 @@
 #  Penggunaan:
 #    curl -fsSL https://raw.githubusercontent.com/gocbtsystem-rgb/gocbtsystem/main/install.sh | sudo bash
 #
-#  Bisa dijalankan ulang untuk update binary (tanpa menghapus .env).
+#  Bisa dijalankan ulang untuk update (binary + script di-refresh,
+#  .env tidak dihapus).
 # ============================================================
 set -e
 
 REPO="gocbtsystem-rgb/gocbtsystem"
-BINARY="gocbt-panel-linux"
 INSTALL_DIR="/opt/gocbt-panel"
 SERVICE="gocbt-panel"
 
@@ -27,16 +27,38 @@ if [ -f /etc/os-release ]; then
 fi
 echo "== GoCBT Panel installer =="
 
-# --- [1/5] download binary ---
 mkdir -p "$INSTALL_DIR"
-echo "[1/5] Mengunduh binary..."
-curl -fsSL -o "$INSTALL_DIR/gocbt-panel" "https://raw.githubusercontent.com/$REPO/main/$BINARY"
-chmod +x "$INSTALL_DIR/gocbt-panel"
-echo "      OK: $INSTALL_DIR/gocbt-panel"
 
-# --- [2/5] .env (jangan timpa bila sudah ada) ---
+# --- [1/6] download panel binary ---
+# (via file sementara + mv, agar aman walau binary lama sedang berjalan)
+echo "[1/6] Mengunduh panel binary..."
+curl -fsSL -o "$INSTALL_DIR/gocbt-panel.new" "https://raw.githubusercontent.com/$REPO/main/gocbt-panel-linux"
+chmod +x "$INSTALL_DIR/gocbt-panel.new"
+mv -f "$INSTALL_DIR/gocbt-panel.new" "$INSTALL_DIR/gocbt-panel"
+
+# --- [2/6] download script build + Dockerfile ---
+echo "[2/6] Mengunduh build-image.sh & Dockerfile..."
+curl -fsSL -o "$INSTALL_DIR/build-image.sh" "https://raw.githubusercontent.com/$REPO/main/build-image.sh"
+curl -fsSL -o "$INSTALL_DIR/Dockerfile" "https://raw.githubusercontent.com/$REPO/main/Dockerfile"
+chmod +x "$INSTALL_DIR/build-image.sh"
+
+# --- [3/6] download binary sekolah (release assets; opsional) ---
+echo "[3/6] Mengunduh binary sekolah..."
+for f in gocbt_linux gocbt-install; do
+  if curl -fsSL -o "$INSTALL_DIR/$f" "https://github.com/$REPO/releases/latest/download/$f"; then
+    chmod +x "$INSTALL_DIR/$f"
+    echo "      OK: $f"
+  else
+    rm -f "$INSTALL_DIR/$f"
+    echo "      LEWATI: $f tidak ada di Release."
+    echo "      Copy manual ke $INSTALL_DIR/ bila butuh fitur Build:"
+    echo "        scp $f root@IP-VPS:$INSTALL_DIR/"
+  fi
+done
+
+# --- [4/6] .env (jangan timpa bila sudah ada) ---
 if [ ! -f "$INSTALL_DIR/.env" ]; then
-  echo "[2/5] Membuat .env dengan kredensial acak..."
+  echo "[4/6] Membuat .env dengan kredensial acak..."
   ADMIN_PASS="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)"
   SESSION_SECRET="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 48)"
   cat > "$INSTALL_DIR/.env" <<EOF
@@ -49,11 +71,11 @@ EOF
   chmod 600 "$INSTALL_DIR/.env"
   echo "      OK"
 else
-  echo "[2/5] .env sudah ada, dilewati (kredensial lama dipertahankan)."
+  echo "[4/6] .env sudah ada, dilewati (kredensial lama dipertahankan)."
 fi
 
-# --- [3/5] systemd service ---
-echo "[3/5] Memasang systemd service..."
+# --- [5/6] systemd service ---
+echo "[5/6] Memasang systemd service..."
 cat > "/etc/systemd/system/$SERVICE.service" <<EOF
 [Unit]
 Description=GoCBT Panel
@@ -74,8 +96,8 @@ systemctl enable "$SERVICE" >/dev/null 2>&1 || true
 systemctl restart "$SERVICE"
 echo "      OK"
 
-# --- [4/5] tunggu service ---
-echo "[4/5] Menunggu service..."
+# --- [6/6] tunggu service ---
+echo "[6/6] Menunggu service..."
 sleep 3
 if ! systemctl is-active --quiet "$SERVICE"; then
   echo "ERROR: service gagal berjalan."
@@ -83,7 +105,7 @@ if ! systemctl is-active --quiet "$SERVICE"; then
   exit 1
 fi
 
-# --- [5/5] ringkasan ---
+# --- ringkasan ---
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [ -z "$IP" ] && IP="IP-SERVER"
 PASS="$(grep '^PANEL_PASS=' "$INSTALL_DIR/.env" | cut -d= -f2)"
